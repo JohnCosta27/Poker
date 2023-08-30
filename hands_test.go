@@ -42,6 +42,10 @@ func TestFlush(t *testing.T) {
     t.Error("Should have been a flush")
   }
 
+  if (isThreeOfAKind(cards)) {
+    t.Error("Should not have been a three of a kind")
+  }
+
   if (!isStraightFlush(cards)) {
     t.Error("Should have been a straight flush")
   }
