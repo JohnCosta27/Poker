@@ -28,17 +28,20 @@ func GetHand() {
 // Helper Functions -> Assumes cards are sorted.
 // ---------------------------------------------
 
-func isStraightFlush(SortedCards []Card) bool {
-  assert7Cards(SortedCards)
+func isRoyalFlush(SortedCards []Card) bool {
+  panic("Not implemented")
+}
 
-  return isStraightHelper(SortedCards[0:5]) && isFlush(SortedCards[0:5]) ||
-    isStraightHelper(SortedCards[1:6]) && isFlush(SortedCards[1:6]) ||
-    isStraightHelper(SortedCards[2:7]) && isFlush(SortedCards[2:7])
+// Straight Flush
+// 
+// Straight that in the same 5 cards is also a flush
+// Code same as `isStraight` but with the type taken
+// into account.
+func isStraightFlush(SortedCards []Card) bool {
+  return true
 }
 
 func isFourOfAKind(SortedCards []Card) bool {
-  assert7Cards(SortedCards)
-
   cardValueMap := make(map[int]int)
 
   for _, card := range SortedCards {
@@ -57,6 +60,32 @@ func isFourOfAKind(SortedCards []Card) bool {
   }
   
   return false
+}
+
+func isFullHouse(SortedCards []Card) bool {
+  cardValueMap := make(map[int]int)
+
+  for _, card := range SortedCards {
+    _, ok := cardValueMap[int(card.Value)]
+    if ok {
+      cardValueMap[int(card.Value)] += 1
+      continue
+    }
+    cardValueMap[int(card.Value)] = 1
+  }
+
+  threeOfAKind := false
+  pair := false
+
+  for _, count := range cardValueMap {
+    if count == 3 {
+      threeOfAKind = true
+    } else if count == 2 {
+      pair = true
+    }
+  }
+
+  return threeOfAKind && pair
 }
 
 // Handles any number of cards
@@ -83,8 +112,6 @@ func isFlush(SortedCards []Card) bool {
 }
 
 func isStraight(SortedCards []Card) bool {
-  assert7Cards(SortedCards)
-
   counter := 1
 
   //
@@ -106,27 +133,7 @@ func isStraight(SortedCards []Card) bool {
   return counter >= 5;
 }
 
-func isStraightHelper(SortedCards []Card) bool {
-  assert5Cards(SortedCards)
-
-  // Edge case 
-  // Ace acts as both 1 and above king.
-  
-  // We are on the top straight: 10, J, Q, K, A
-  if (SortedCards[0].Value == ACE && SortedCards[1].Value == TEN) {
-    return SortedCards[2].Value == JACK && SortedCards[3].Value == QUEEN && SortedCards[4].Value == KING
-  }
-
-
-  return SortedCards[0].Value == SortedCards[1].Value - 1 && 
-    SortedCards[1].Value == SortedCards[2].Value - 1 && 
-    SortedCards[2].Value == SortedCards[3].Value - 1 && 
-    SortedCards[3].Value == SortedCards[4].Value - 1 
-}
-
 func isThreeOfAKind(SortedCards []Card) bool {
-  assert7Cards(SortedCards)
-
   cardValueMap := make(map[int]int)
 
   for _, card := range SortedCards {
@@ -144,6 +151,29 @@ func isThreeOfAKind(SortedCards []Card) bool {
     }
   }
   
+  return false
+}
+
+func isTwoPair(SortedCards []Card) bool {
+  pairsCount := 0
+
+  for i := 1; i < len(SortedCards); i++ {
+    if (SortedCards[i - 1].Value == SortedCards[i].Value) {
+      pairsCount++;
+      i += 1;
+    }
+  }
+
+  return pairsCount >= 2
+}
+
+func isPair(SortedCards []Card) bool {
+  for i := 1; i < len(SortedCards); i++ {
+    if (SortedCards[i - 1].Value == SortedCards[i].Value) {
+      return true
+    }
+  }
+
   return false
 }
 
