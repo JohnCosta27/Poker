@@ -244,3 +244,44 @@ func TestThreeOfAKind(t *testing.T) {
   }
 
 }
+
+func TestTwoPair(t *testing.T) {
+  cards := []Card{
+    {
+      Value: TWO,
+      Type: SPADE,
+    },
+    {
+      Value: TWO,
+      Type: HEART,
+    },
+    {
+      Value: THREE,
+      Type: DIAMOND,
+    },
+    {
+      Value: FOUR,
+      Type: CLUB,
+    },
+    {
+      Value: FIVE,
+      Type: HEART,
+    },
+    {
+      Value: SEVEN,
+      Type: SPADE,
+    },
+    {
+      Value: SEVEN,
+      Type: SPADE,
+    },
+  }
+
+  if (!isTwoPair(cards)) {
+    t.Error("Should be a two pair (TWOs and SEVENs)")
+  }
+
+  if (!isPair(cards)) {
+    t.Error("Should also be a pair")
+  }
+}
