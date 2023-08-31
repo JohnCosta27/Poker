@@ -130,3 +130,117 @@ func TestLowStraight(t *testing.T) {
     t.Error("Should be a flush")
   }
 }
+
+func TestFullHouse(t *testing.T) {
+  cards := []Card{
+    {
+      Value: TWO,
+      Type: SPADE,
+    },
+    {
+      Value: TWO,
+      Type: HEART,
+    },
+    {
+      Value: TWO,
+      Type: DIAMOND,
+    },
+    {
+      Value: THREE,
+      Type: SPADE,
+    },
+    {
+      Value: THREE,
+      Type: HEART,
+    },
+    {
+      Value: QUEEN,
+      Type: SPADE,
+    },
+    {
+      Value: KING,
+      Type: SPADE,
+    },
+  }
+
+  if (!isFullHouse(cards)) {
+    t.Error("Should be a full house (TWO & THREE)")
+  }
+
+}
+
+func TestFourOfAKind(t *testing.T) {
+  cards := []Card{
+    {
+      Value: TWO,
+      Type: SPADE,
+    },
+    {
+      Value: TWO,
+      Type: HEART,
+    },
+    {
+      Value: TWO,
+      Type: DIAMOND,
+    },
+    {
+      Value: TWO,
+      Type: CLUB,
+    },
+    {
+      Value: THREE,
+      Type: HEART,
+    },
+    {
+      Value: QUEEN,
+      Type: SPADE,
+    },
+    {
+      Value: KING,
+      Type: SPADE,
+    },
+  }
+
+  if (!isFourOfAKind(cards)) {
+    t.Error("Should be a four of a kind (TWOs)")
+  }
+
+}
+
+func TestThreeOfAKind(t *testing.T) {
+  cards := []Card{
+    {
+      Value: TWO,
+      Type: SPADE,
+    },
+    {
+      Value: TWO,
+      Type: HEART,
+    },
+    {
+      Value: TWO,
+      Type: DIAMOND,
+    },
+    {
+      Value: THREE,
+      Type: CLUB,
+    },
+    {
+      Value: THREE,
+      Type: HEART,
+    },
+    {
+      Value: QUEEN,
+      Type: SPADE,
+    },
+    {
+      Value: KING,
+      Type: SPADE,
+    },
+  }
+
+  if (!isThreeOfAKind(cards)) {
+    t.Error("Should be a three of a kind (TWOs)")
+  }
+
+}
