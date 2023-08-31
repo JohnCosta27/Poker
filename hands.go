@@ -15,6 +15,8 @@ const (
   ROYAL_FLUSH
 )
 
+const HAND_LEN = 7
+
 /**
  * Given 7 cards, what poker hand did you get.
  */
@@ -82,13 +84,39 @@ func isFlush(SortedCards []Card) bool {
 
 func isStraight(SortedCards []Card) bool {
   assert7Cards(SortedCards)
-  return isStraightHelper(SortedCards[0:5]) || 
-    isStraightHelper(SortedCards[1:6]) || 
-    isStraightHelper(SortedCards[2:7])
+
+  counter := 1
+
+  //
+  // Edge Case (A, 2, 3, 4 ,5)
+  // IF there is an ace, and a two. We count it as a consequitive card.
+  // 
+
+  containsAce := SortedCards[HAND_LEN - 1].Value == ACE
+  if (containsAce && SortedCards[0].Value == TWO) {
+    counter++;
+  }
+
+  for i := 1; i < HAND_LEN; i++ {
+    if (SortedCards[i - 1].Value < SortedCards[i].Value) {
+      counter++;
+    }
+  }
+
+  return counter >= 5;
 }
 
 func isStraightHelper(SortedCards []Card) bool {
   assert5Cards(SortedCards)
+
+  // Edge case 
+  // Ace acts as both 1 and above king.
+  
+  // We are on the top straight: 10, J, Q, K, A
+  if (SortedCards[0].Value == ACE && SortedCards[1].Value == TEN) {
+    return SortedCards[2].Value == JACK && SortedCards[3].Value == QUEEN && SortedCards[4].Value == KING
+  }
+
 
   return SortedCards[0].Value == SortedCards[1].Value - 1 && 
     SortedCards[1].Value == SortedCards[2].Value - 1 && 
@@ -120,7 +148,7 @@ func isThreeOfAKind(SortedCards []Card) bool {
 }
 
 func assert7Cards(Cards []Card) {
-  if (len(Cards) != 7) {
+  if (len(Cards) != HAND_LEN) {
     panic("asset7Cards called without 7 cards")
   }
 }
