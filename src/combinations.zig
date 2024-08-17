@@ -22,11 +22,6 @@ fn ncr(n: usize, r: usize) usize {
     return factorial(n) / (factorial(r) * factorial(n - r));
 }
 
-//
-// This file contains all the comptime generation for populating unique arrays.
-//
-//
-
 fn combinations(comptime n: []const u16, comptime k: usize) []const u16 {
     if (k == 1) {
         return n;
