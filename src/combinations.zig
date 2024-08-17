@@ -22,7 +22,9 @@ fn ncr(n: usize, r: usize) usize {
     return factorial(n) / (factorial(r) * factorial(n - r));
 }
 
-fn combinations(comptime n: []const u16, comptime k: usize) []const u16 {
+pub fn combinations(comptime n: []const u16, comptime k: usize) []const u16 {
+    @setEvalBranchQuota(10000);
+
     if (k == 1) {
         return n;
     }
@@ -65,7 +67,7 @@ test "Base case" {
     const n = comptime [_]u16{ 0x1, 0x2, 0x4 };
     const combos = comptime combinations(&n, 1);
 
-    comptime try expectEqual(&n, combos);
+    comptime try expectEqualSlices(u16, &n, combos);
 }
 
 test "Simple cases" {
@@ -79,12 +81,11 @@ test "Simple cases" {
 }
 
 test "Harder cases" {
-    const n = comptime [_]u16{ 0x1, 0x2, 0x4, 0x8, 0x10 };
+    const n = comptime [_]u16{ 0x10, 0x8, 0x4, 0x2, 0x1 };
     const combos = comptime combinations(&n, 3);
 
     // 11111 C 3 = 00111, 01011, 01101, 01110, 10011, 10101, 10110, 11001, 11010, 11100
-    // Order is slightly different because of the algorithms traversal.
-    const expected_combos = comptime [_]u16{ 7, 11, 19, 13, 21, 25, 14, 22, 26, 28 };
+    const expected_combos = comptime [_]u16{ 28, 26, 25, 22, 21, 19, 14, 13, 11, 7 };
 
     comptime try expectEqualSlices(u16, &expected_combos, combos);
 }
