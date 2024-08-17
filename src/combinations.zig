@@ -71,11 +71,11 @@ test "Base case" {
 }
 
 test "Simple cases" {
-    const n = comptime [_]u16{ 0x1, 0x2, 0x4 };
+    const n = comptime [_]u16{ 0x4, 0x2, 0x1 };
     const combos = comptime combinations(&n, 2);
 
     // 011, 101, 110
-    const expected_combos = comptime [_]u16{ 0x0003, 0x0005, 0x0006 };
+    const expected_combos = comptime [_]u16{ 0x0006, 0x0005, 0x0003 };
 
     comptime try expectEqualSlices(u16, &expected_combos, combos);
 }

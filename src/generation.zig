@@ -11,7 +11,7 @@ fn bitmask_as_cards(mask: u16) [5]Cards.Rank {
     var cards: [5]Cards.Rank = undefined;
     var index: usize = 0;
 
-    inline for (Cards.array) |c| {
+    inline for (Cards.reversed_array) |c| {
         if (mask & c > 0) {
             cards[index] = @enumFromInt(c);
             index += 1;
@@ -22,7 +22,7 @@ fn bitmask_as_cards(mask: u16) [5]Cards.Rank {
 }
 
 fn unique5() []const u16 {
-    return Combo.combinations(&Cards.reversed_array, 5);
+    return Combo.combinations(&Cards.array, 5);
 }
 
 test "Bitmask to cards" {
