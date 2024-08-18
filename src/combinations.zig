@@ -18,7 +18,7 @@ fn factorial(n: usize) usize {
     return f;
 }
 
-fn ncr(n: usize, r: usize) usize {
+pub fn ncr(n: usize, r: usize) usize {
     return factorial(n) / (factorial(r) * factorial(n - r));
 }
 
