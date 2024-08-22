@@ -32,10 +32,11 @@ fn unique5() []const u16 {
     return Combo.combinations(&Cards.array, 5);
 }
 
-fn generate_flushes() []u16 {
+const HIGHEST_BIT_PATTERN = (Cards.ace | Cards.king | Cards.queen | Cards.jack | Cards.ten) + 1;
+
+pub fn generate_flushes() [HIGHEST_BIT_PATTERN]u16 {
     const unique_hands = unique5();
-    @compileLog(unique_hands.len);
-    var flushes: [unique_hands[0] + 1]u16 = std.mem.zeroes([unique_hands[0] + 1]u16);
+    var flushes: [HIGHEST_BIT_PATTERN]u16 = std.mem.zeroes([HIGHEST_BIT_PATTERN]u16);
 
     // Do straight flushes seperately
     flushes[@truncate(Cards.ace | Cards.king | Cards.queen | Cards.jack | Cards.ten)] = 1;
@@ -60,13 +61,13 @@ fn generate_flushes() []u16 {
         flushes_values += 1;
     }
 
-    return &flushes;
+    return flushes;
 }
 
-fn generate_unique() []u16 {
+pub fn generate_unique() [HIGHEST_BIT_PATTERN]u16 {
     const unique_hands = unique5();
 
-    var unique: [unique_hands[0] + 1]u16 = std.mem.zeroes([unique_hands[0] + 1]u16);
+    var unique: [HIGHEST_BIT_PATTERN]u16 = std.mem.zeroes([HIGHEST_BIT_PATTERN]u16);
 
     const UNIQUE_HANDS = unique_hands.len;
 
@@ -113,23 +114,38 @@ fn generate_unique() []u16 {
         unique_values += 1;
     }
 
-    return &unique;
+    return unique;
 }
 
-fn generate_rest() []usize {
-    @setEvalBranchQuota(100000);
+const NUM_OF_STRAIGHT_FLUSHES = 10;
 
-    const NUM_OF_QUADS = 156;
-    const NUM_OF_BOATS = 156;
+const NUM_OF_QUADS = 156;
 
-    const NUM_OF_SETS = 13 * Combo.ncr(12, 2);
-    const NUM_OF_TWO_PAIR = 13 * Combo.ncr(12, 2);
+const NUM_OF_FLUSHES = 1277;
+const NUM_OF_STRAIGHTS = 10;
 
-    const NUM_OF_PAIR = 13 * Combo.ncr(12, 3);
+const NUM_OF_BOATS = 156;
 
-    var rest: [NUM_OF_QUADS + NUM_OF_BOATS + NUM_OF_SETS + NUM_OF_TWO_PAIR + NUM_OF_PAIR]usize = undefined;
+const NUM_OF_SETS = 13 * Combo.ncr(12, 2);
+const NUM_OF_TWO_PAIR = 13 * Combo.ncr(12, 2);
+
+const NUM_OF_PAIR = 13 * Combo.ncr(12, 3);
+
+const REST_SIZE = NUM_OF_QUADS + NUM_OF_BOATS + NUM_OF_SETS + NUM_OF_TWO_PAIR + NUM_OF_PAIR;
+
+const RestWithPosition = struct {
+    rest: [REST_SIZE]usize,
+    strength: [REST_SIZE]usize,
+};
+
+pub fn generate_rest() RestWithPosition {
+    @setEvalBranchQuota(1000000);
+
+    var rest: [REST_SIZE]usize = undefined;
+    var absolute_strength: [REST_SIZE]usize = undefined;
 
     var index: usize = 0;
+    var strength_index: usize = NUM_OF_STRAIGHT_FLUSHES + 1;
 
     // Quads + Boats
     for (Cards.prime_array) |card| {
@@ -141,13 +157,18 @@ fn generate_rest() []usize {
             rest[index] = card * card * card * card * kicker;
             rest[index + NUM_OF_QUADS] = card * card * card * kicker * kicker;
 
+            absolute_strength[index] = strength_index;
+            absolute_strength[index + NUM_OF_QUADS] = strength_index + NUM_OF_QUADS;
+
+            strength_index += 1;
             index += 1;
         }
     }
 
     index += NUM_OF_BOATS;
+    strength_index += NUM_OF_BOATS + NUM_OF_FLUSHES + NUM_OF_STRAIGHTS;
 
-    // Sets + Two pair
+    // Sets
     for (Cards.prime_array) |card| {
         for (Cards.prime_array) |kicker| {
             if (card == kicker) {
@@ -160,14 +181,36 @@ fn generate_rest() []usize {
                 }
 
                 rest[index] = card * card * card * kicker * second_kicker;
-                rest[index + NUM_OF_SETS] = card * card * kicker * kicker * second_kicker;
+
+                absolute_strength[index] = strength_index;
 
                 index += 1;
+                strength_index += 1;
             }
         }
     }
 
-    index += NUM_OF_SETS;
+    // Two pairs
+    for (Cards.prime_array) |card| {
+        for (Cards.prime_array) |kicker| {
+            if (kicker >= card) {
+                continue;
+            }
+
+            for (Cards.prime_array) |second_kicker| {
+                if (card == second_kicker or kicker == second_kicker) {
+                    continue;
+                }
+
+                rest[index] = card * card * kicker * kicker * second_kicker;
+
+                absolute_strength[index] = strength_index;
+
+                index += 1;
+                strength_index += 1;
+            }
+        }
+    }
 
     // Pairs
     for (Cards.prime_array) |card| {
@@ -188,13 +231,58 @@ fn generate_rest() []usize {
 
                     rest[index] = card * card * kicker * second_kicker * third_kicker;
 
+                    absolute_strength[index] = strength_index;
+
                     index += 1;
+                    strength_index += 1;
                 }
             }
         }
     }
 
-    return &rest;
+    var rest_with_index: [REST_SIZE]u128 = undefined;
+    for (rest, absolute_strength, 0..) |r, s, i| {
+        rest_with_index[i] = @as(u128, r) << 64 | @as(u128, s);
+    }
+
+    std.mem.sort(u128, &rest_with_index, {}, comptime std.sort.asc(u128));
+
+    var index_to_strength: [REST_SIZE]usize = undefined;
+
+    for (rest_with_index, 0..) |sorted, i| {
+        const product: usize = @truncate(sorted >> 64);
+        const strength: usize = @truncate(sorted);
+
+        rest[i] = product;
+        index_to_strength[i] = strength;
+    }
+
+    return RestWithPosition{ .rest = rest, .strength = index_to_strength };
+}
+
+pub fn rest_strength(rest: RestWithPosition, hand: usize) usize {
+    var head: usize = 0;
+    var tail: usize = rest.rest.len - 1;
+
+    while (head <= tail) {
+        const middle = (head + tail) / 2;
+
+        if (rest.rest[middle] == hand) {
+            return rest.strength[middle];
+        }
+
+        if (rest.rest[middle] < hand) {
+            head = middle + 1;
+            continue;
+        }
+
+        if (rest.rest[middle] > hand) {
+            tail = middle - 1;
+            continue;
+        }
+    }
+
+    unreachable;
 }
 
 test "Bitmask to cards" {
@@ -204,44 +292,12 @@ test "Bitmask to cards" {
     try expectEqualSlices(Cards.Rank, &ranks, &[_]Cards.Rank{ Cards.Rank.ten, Cards.Rank.jack, Cards.Rank.queen, Cards.Rank.king, Cards.Rank.ace });
 }
 
-// test "Generate flushes array" {
-//     @setEvalBranchQuota(1000000);
-//
-//     const flushes = comptime generate_flushes();
-//     const unique = comptime generate_unique();
-//
-//     @compileLog(flushes);
-//     @compileLog(unique);
-// }
+test "Binary search for hand strength" {
+    const rest = generate_rest();
 
-test "Perfect hash" {
-    const allocator = std.testing.allocator;
+    const AAAAK: usize = Cards.prime_ace * Cards.prime_ace * Cards.prime_ace * Cards.prime_ace * Cards.prime_king;
+    try expectEqual(rest_strength(rest, AAAAK), 11);
 
-    const rest = comptime generate_rest();
-
-    const p = 5047573;
-
-    const a = 327892;
-    const b = 287232;
-
-    var seen_numbers = std.AutoHashMap(usize, bool).init(allocator);
-
-    defer seen_numbers.deinit();
-
-    inline for (rest) |hand| {
-        const hash = (a * hand + b) % p;
-        _ = hash;
-
-        print("{}\n", .{hand});
-
-        if (seen_numbers.get(hand) != null) {
-            // just fail.
-            try expectEqual(true, false);
-        }
-
-        try seen_numbers.put(hand, true);
-    }
-
-    // we're all good;
-    try expectEqual(true, true);
+    const KKKKA: usize = Cards.prime_king * Cards.prime_king * Cards.prime_king * Cards.prime_king * Cards.prime_ace;
+    try expectEqual(rest_strength(rest, KKKKA), 23);
 }

@@ -1,4 +1,7 @@
 const std = @import("std");
+const Generation = @import("./generation.zig");
+const Cards = @import("./cards.zig");
+
 const print = std.debug.print;
 
 const expectEqual = std.testing.expectEqual;
@@ -48,7 +51,11 @@ fn flush_mask(c1: Card, c2: Card, c3: Card, c4: Card, c5: Card) u32 {
 }
 
 fn unique_mask(c1: Card, c2: Card, c3: Card, c4: Card, c5: Card) u32 {
-    return c1.Mask | c2.Mask | c3.Mask | c3.Mask | c4.Mask | c5.Mask >> 16;
+    return (c1.Mask | c2.Mask | c3.Mask | c3.Mask | c4.Mask | c5.Mask) >> 16;
+}
+
+fn unique_prime(c1: Card, c2: Card, c3: Card, c4: Card, c5: Card) usize {
+    return c1.get_prime() * c2.get_prime() * c3.get_prime() * c4.get_prime() * c5.get_prime();
 }
 
 const Card = struct {
@@ -56,8 +63,12 @@ const Card = struct {
     Rank: Rank,
     Mask: u32,
 
-    pub fn get_suit(self: Deck) Suit {
+    pub fn get_suit(self: Card) Suit {
         _ = self;
+    }
+
+    pub fn get_prime(self: Card) usize {
+        return self.Mask & 0xFF;
     }
 };
 
@@ -145,4 +156,37 @@ test "Using mask, if we have a flush" {
     try expect(mask == 0);
 }
 
-test "Unique cards" {}
+const flushes = Generation.generate_flushes();
+const unique = Generation.generate_unique();
+const rest = Generation.generate_rest();
+
+fn get_hand_strength(c1: Card, c2: Card, c3: Card, c4: Card, c5: Card) usize {
+    const mask = flush_mask(c1, c2, c3, c4, c5);
+    const u = unique_mask(c1, c2, c3, c4, c5);
+
+    // We have a straight flush or a flush
+    if (mask > 0) {
+        return @as(usize, flushes[u]);
+    }
+
+    const unique_value = unique[u];
+    if (unique_value > 0) {
+        return @as(usize, unique_value);
+    }
+
+    return Generation.rest_strength(rest, unique_prime(c1, c2, c3, c4, c5));
+}
+
+test "Relative hand strengths" {
+    const c1 = get_card(Rank.ace, Suit.heart);
+    const c2 = get_card(Rank.ace, Suit.club);
+    const c3 = get_card(Rank.ace, Suit.spade);
+    const c4 = get_card(Rank.ace, Suit.diamond);
+    const c5 = get_card(Rank.king, Suit.heart);
+    const c6 = get_card(Rank.king, Suit.diamond);
+
+    const quad = get_hand_strength(c1, c2, c3, c4, c5);
+    const boat = get_hand_strength(c1, c2, c3, c5, c6);
+
+    try expect(quad < boat);
+}
