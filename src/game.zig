@@ -23,7 +23,7 @@ const Player = struct {
     }
 };
 
-const Round = enum { preflop, flop, turn, river };
+const Round = enum { preflop, flop, turn, river, over };
 const Move = enum { fold, check, call, raise };
 
 pub const Game = struct {
@@ -62,9 +62,17 @@ pub const Game = struct {
         var previous_bet: f64 = 0.0;
         var is_set = false;
 
-        for (self.players) |player| {
+        var players_in: u8 = 0;
+        var player_in_index: usize = 0;
+
+        for (self.players, 0..) |player, i| {
             if (!player.acted) {
                 return;
+            }
+
+            if (!player.is_out) {
+                players_in += 1;
+                player_in_index = i;
             }
 
             if (!is_set and !player.is_out) {
@@ -73,9 +81,17 @@ pub const Game = struct {
                 continue;
             }
 
-            if (previous_bet != player.current_bet) {
+            if (previous_bet != player.current_bet and players_in > 1) {
                 return;
             }
+        }
+
+        // Everyone folded.
+        if (players_in == 1) {
+            self.players[player_in_index].*.stack += self.pot_size;
+
+            self.setup_round(Round.over);
+            return;
         }
 
         switch (self.round) {
@@ -128,7 +144,16 @@ pub const Game = struct {
 
     pub fn setup_round(self: *Game, round: Round) void {
         switch (round) {
+            Round.over => {
+                self.*.round = round;
+            },
             Round.preflop => {
+                for (self.players) |player| {
+                    player.*.is_out = false;
+                    player.*.acted = false;
+                    player.*.current_bet = 0.0;
+                }
+
                 const small_blind: f64 = self.blind * 0.5;
 
                 self.*.pot_size += self.blind + small_blind;
@@ -217,4 +242,42 @@ test "Preflop - Fold, Raise, Raise, Call" {
     try expectEqual(game.players[0].stack, PLAYER_STACK);
     try expectEqual(game.players[1].stack, PLAYER_STACK - 20);
     try expectEqual(game.players[2].stack, PLAYER_STACK - 20);
+}
+
+test "Preflop - Fold, Raise, Raise, Fold" {
+    const PLAYER_STACK: f64 = 100.0;
+    const BIG_BLIND: f64 = 4.0;
+
+    var p1 = Player{
+        .stack = PLAYER_STACK,
+        .is_out = false,
+        .current_bet = 0,
+        .acted = false,
+    };
+    var p2 = Player{ .stack = PLAYER_STACK, .is_out = false, .current_bet = 0, .acted = false };
+    var p3 = Player{ .stack = PLAYER_STACK, .is_out = false, .current_bet = 0, .acted = false };
+
+    var players = [_]*Player{ &p1, &p2, &p3 };
+
+    var game = Game{ .blind = BIG_BLIND, .players = &players, .round = Round.preflop, .pot_size = 0, .dealer_index = 0, .players_acted = 0, .current_player_index = 0, .highest_bet = 0 };
+
+    game.setup_round(Round.preflop);
+
+    try expectEqual(game.pot_size, game.blind * 1.5);
+    try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
+    try expectEqual(game.players[2].stack, PLAYER_STACK - BIG_BLIND);
+    try expectEqual(game.players_acted, 2);
+
+    game.fold();
+    game.raise(10.0);
+    game.raise(20.0);
+
+    try expectEqual(game.pot_size, 30);
+
+    game.fold();
+
+    try expectEqual(game.round, Round.over);
+    try expectEqual(game.players[0].stack, PLAYER_STACK);
+    try expectEqual(game.players[1].stack, PLAYER_STACK - 10.0);
+    try expectEqual(game.players[2].stack, PLAYER_STACK + 10.0);
 }
