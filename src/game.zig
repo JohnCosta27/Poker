@@ -15,10 +15,12 @@ const Player = struct {
 
     current_bet: f64,
     is_out: bool,
+    has_acted: bool,
 
     pub fn bet(self: *Player, amount: f64) void {
         self.*.current_bet += amount;
         self.*.stack -= amount;
+        self.*.has_acted = true;
     }
 };
 
@@ -58,63 +60,83 @@ pub const Game = struct {
     }
 
     fn check_round_over(self: *Game) void {
-        var previous_bet: f64 = 0.0;
-        var is_set = false;
-
-        var players_in: u8 = 0;
+        var players_in: usize = 0;
         var player_in_index: usize = 0;
 
-        for (self.players, 0..) |player, i| {
+        //
+        // Check that we still have players in the game.
+        // And if not, start a new round.
+        //
+
+        for (self.players, 0..) |player, index| {
             if (!player.is_out) {
                 players_in += 1;
-                player_in_index = i;
-            }
-
-            if (!is_set and !player.is_out) {
-                previous_bet = player.current_bet;
-                is_set = true;
-                continue;
-            }
-
-            if (previous_bet != player.current_bet and players_in > 1) {
-                return;
+                player_in_index = index;
             }
         }
 
         // Everyone folded.
         if (players_in == 1) {
-            self.players[player_in_index].*.stack += self.pot_size;
-
             self.setup_round(Round.over);
+            print("All players folded\n", .{});
             return;
         }
 
-        const small_blind_index = (self.dealer_index + SMALL_BLIND_OFFSET) % self.players.len;
-        const big_blind_index = (self.dealer_index + BIG_BLIND_OFFSET) % self.players.len;
+        var players_acted: usize = 0;
+        for (self.players) |player| {
+            if (player.has_acted) {
+                players_acted += 1;
+            }
+        }
 
-        if (self.round == Round.preflop and small_blind_index == self.players_acted and self.players[big_blind_index].current_bet == self.blind) {
-            // We have all bet, except the big blind.
-            // They need to check or raise.
-            // Annoying edge case.
+        // All players must act at least once.
+        if (players_acted < self.players.len) {
+            print("not enough players acted\n", .{});
             return;
+        }
+
+        // If all players have acted.
+        // 1. If the bet sizes are all the same, we move on.
+        const first_player = top: {
+            for (self.players) |player| {
+                if (player.is_out) {
+                    continue;
+                }
+
+                break :top player;
+            }
+
+            unreachable;
+        };
+
+        for (self.players[1..]) |player| {
+            if (player.is_out) {
+                continue;
+            }
+
+            if (player.current_bet != first_player.current_bet) {
+                print("not matched bets\n", .{});
+                return;
+            }
         }
 
         switch (self.round) {
             Round.preflop => self.setup_round(Round.flop),
             Round.flop => self.setup_round(Round.turn),
             Round.turn => self.setup_round(Round.river),
-            Round.river => {
-                print("Showdown!\n", .{});
-            },
+            Round.river => self.setup_round(Round.over),
             else => unreachable,
         }
     }
 
     pub fn fold(self: *Game) void {
         const player = self.get_next_player();
-        print("{s} folded \n", .{player.name});
+        print("{s} folded\n", .{player.name});
 
         player.*.is_out = true;
+        player.*.has_acted = true;
+
+        print("{s} {}\n", .{ player.name, player.is_out });
 
         self.check_round_over();
     }
@@ -126,6 +148,8 @@ pub const Game = struct {
         if (player.current_bet != self.highest_bet) {
             unreachable;
         }
+
+        player.*.has_acted = true;
 
         self.check_round_over();
     }
@@ -150,6 +174,8 @@ pub const Game = struct {
 
         player.bet(difference);
 
+        print("{s} stack: {}\n", .{ player.name, player.stack });
+
         self.*.highest_bet = amount;
         self.*.pot_size += difference;
 
@@ -158,7 +184,7 @@ pub const Game = struct {
 
     pub fn setup_round(self: *Game, round: Round) void {
         for (self.players) |player| {
-            player.*.is_out = false;
+            player.*.has_acted = false;
             player.*.current_bet = 0.0;
         }
 
@@ -168,6 +194,9 @@ pub const Game = struct {
         switch (round) {
             Round.preflop => {
                 print("New round!\n", .{});
+                for (self.players) |player| {
+                    player.*.is_out = false;
+                }
 
                 const small_blind: f64 = self.blind * 0.5;
 
@@ -181,6 +210,26 @@ pub const Game = struct {
 
                 self.*.highest_bet = self.blind;
             },
+            Round.over => {
+                print("Round is over!\n", .{});
+                // actually figure out who wins the rounds.
+                var players_in: usize = 0;
+                var player_in_index: usize = 0;
+                for (self.players, 0..) |player, index| {
+                    if (!player.is_out) {
+                        players_in += 1;
+                        player_in_index = index;
+                    }
+                }
+
+                if (players_in == 1) {
+                    print("Winner is: {s}\n", .{self.players[player_in_index].name});
+                    print("Pot size: {} | Players stack: {}\n", .{ self.pot_size, self.players[player_in_index].stack });
+                    self.players[player_in_index].*.stack += self.pot_size;
+                } else {
+                    @panic("showdown not implemented yet.");
+                }
+            },
             else => {
                 print("---- {} ----\n", .{round});
                 print("Pot size: {}\n", .{self.pot_size});
@@ -192,107 +241,107 @@ pub const Game = struct {
 
 const expectEqual = std.testing.expectEqual;
 
-// test "Preflop - Fold, Call, Check" {
-//     const PLAYER_STACK: f64 = 100;
-//     const BIG_BLIND: f64 = 4;
-//
-//     var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .is_out = false, .current_bet = 0 };
-//     var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .is_out = false, .current_bet = 0 };
-//     var p3 = Player{ .name = "P3", .stack = PLAYER_STACK, .is_out = false, .current_bet = 0 };
-//
-//     var players = [_]*Player{ &p1, &p2, &p3 };
-//
-//     var game = Game{ .blind = BIG_BLIND, .players = &players, .round = Round.preflop, .pot_size = 0, .dealer_index = 0, .players_acted = 0, .current_player_index = 0, .highest_bet = 0 };
-//
-//     game.setup_round(Round.preflop);
-//
-//     try expectEqual(game.pot_size, game.blind * 1.5);
-//     try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
-//     try expectEqual(game.players[2].stack, PLAYER_STACK - BIG_BLIND);
-//     try expectEqual(game.players_acted, 2);
-//
-//     game.fold();
-//     game.call();
-//     game.check();
-//
-//     try expectEqual(game.pot_size, BIG_BLIND * 2);
-//     try expectEqual(game.round, Round.flop);
-//     try expectEqual(game.players[0].stack, PLAYER_STACK);
-//     try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND);
-//     try expectEqual(game.players[2].stack, PLAYER_STACK - BIG_BLIND);
-// }
-//
-// test "Preflop - Fold, Raise, Raise, Call" {
-//     const PLAYER_STACK: f64 = 100.0;
-//     const BIG_BLIND: f64 = 4.0;
-//
-//     var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .is_out = false, .current_bet = 0 };
-//     var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .is_out = false, .current_bet = 0 };
-//     var p3 = Player{ .name = "P3", .stack = PLAYER_STACK, .is_out = false, .current_bet = 0 };
-//
-//     var players = [_]*Player{ &p1, &p2, &p3 };
-//
-//     var game = Game{ .blind = BIG_BLIND, .players = &players, .round = Round.preflop, .pot_size = 0, .dealer_index = 0, .players_acted = 0, .current_player_index = 0, .highest_bet = 0 };
-//
-//     game.setup_round(Round.preflop);
-//
-//     try expectEqual(game.pot_size, game.blind * 1.5);
-//     try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
-//     try expectEqual(game.players[2].stack, PLAYER_STACK - BIG_BLIND);
-//     try expectEqual(game.players_acted, 2);
-//
-//     game.fold();
-//     game.raise(10.0);
-//     game.raise(20.0);
-//     game.call();
-//
-//     try expectEqual(game.pot_size, 40);
-//     try expectEqual(game.round, Round.flop);
-//     try expectEqual(game.players[0].stack, PLAYER_STACK);
-//     try expectEqual(game.players[1].stack, PLAYER_STACK - 20);
-//     try expectEqual(game.players[2].stack, PLAYER_STACK - 20);
-// }
-//
-// test "Preflop - Fold, Raise, Raise, Fold" {
-//     const PLAYER_STACK: f64 = 100.0;
-//     const BIG_BLIND: f64 = 4.0;
-//
-//     var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .is_out = false, .current_bet = 0 };
-//     var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .is_out = false, .current_bet = 0 };
-//     var p3 = Player{ .name = "P3", .stack = PLAYER_STACK, .is_out = false, .current_bet = 0 };
-//
-//     var players = [_]*Player{ &p1, &p2, &p3 };
-//
-//     var game = Game{ .blind = BIG_BLIND, .players = &players, .round = Round.preflop, .pot_size = 0, .dealer_index = 0, .players_acted = 0, .current_player_index = 0, .highest_bet = 0 };
-//
-//     game.setup_round(Round.preflop);
-//
-//     try expectEqual(game.pot_size, game.blind * 1.5);
-//     try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
-//     try expectEqual(game.players[2].stack, PLAYER_STACK - BIG_BLIND);
-//     try expectEqual(game.players_acted, 2);
-//
-//     game.fold();
-//     game.raise(10.0);
-//     game.raise(20.0);
-//
-//     try expectEqual(game.pot_size, 30);
-//
-//     game.fold();
-//
-//     try expectEqual(game.round, Round.over);
-//     try expectEqual(game.players[0].stack, PLAYER_STACK);
-//     try expectEqual(game.players[1].stack, PLAYER_STACK - 10.0);
-//     try expectEqual(game.players[2].stack, PLAYER_STACK + 10.0);
-// }
+test "Preflop - Fold, Call, Check" {
+    const PLAYER_STACK: f64 = 100;
+    const BIG_BLIND: f64 = 4;
+
+    var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .is_out = false, .has_acted = false, .current_bet = 0 };
+    var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .is_out = false, .has_acted = false, .current_bet = 0 };
+    var p3 = Player{ .name = "P3", .stack = PLAYER_STACK, .is_out = false, .has_acted = false, .current_bet = 0 };
+
+    var players = [_]*Player{ &p1, &p2, &p3 };
+
+    var game = Game{ .blind = BIG_BLIND, .players = &players, .round = Round.preflop, .pot_size = 0, .dealer_index = 0, .players_acted = 0, .current_player_index = 0, .highest_bet = 0 };
+
+    game.setup_round(Round.preflop);
+
+    try expectEqual(game.pot_size, game.blind * 1.5);
+    try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
+    try expectEqual(game.players[2].stack, PLAYER_STACK - BIG_BLIND);
+    try expectEqual(game.players_acted, 2);
+
+    game.fold();
+    game.call();
+    game.check();
+
+    try expectEqual(game.pot_size, BIG_BLIND * 2);
+    try expectEqual(game.round, Round.flop);
+    try expectEqual(game.players[0].stack, PLAYER_STACK);
+    try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND);
+    try expectEqual(game.players[2].stack, PLAYER_STACK - BIG_BLIND);
+}
+
+test "Preflop - Fold, Raise, Raise, Call" {
+    const PLAYER_STACK: f64 = 100.0;
+    const BIG_BLIND: f64 = 4.0;
+
+    var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .is_out = false, .has_acted = false, .current_bet = 0 };
+    var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .is_out = false, .has_acted = false, .current_bet = 0 };
+    var p3 = Player{ .name = "P3", .stack = PLAYER_STACK, .is_out = false, .has_acted = false, .current_bet = 0 };
+
+    var players = [_]*Player{ &p1, &p2, &p3 };
+
+    var game = Game{ .blind = BIG_BLIND, .players = &players, .round = Round.preflop, .pot_size = 0, .dealer_index = 0, .players_acted = 0, .current_player_index = 0, .highest_bet = 0 };
+
+    game.setup_round(Round.preflop);
+
+    try expectEqual(game.pot_size, game.blind * 1.5);
+    try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
+    try expectEqual(game.players[2].stack, PLAYER_STACK - BIG_BLIND);
+    try expectEqual(game.players_acted, 2);
+
+    game.fold();
+    game.raise(10.0);
+    game.raise(20.0);
+    game.call();
+
+    try expectEqual(game.pot_size, 40);
+    try expectEqual(game.round, Round.flop);
+    try expectEqual(game.players[0].stack, PLAYER_STACK);
+    try expectEqual(game.players[1].stack, PLAYER_STACK - 20);
+    try expectEqual(game.players[2].stack, PLAYER_STACK - 20);
+}
+
+test "Preflop - Fold, Raise, Raise, Fold" {
+    const PLAYER_STACK: f64 = 100.0;
+    const BIG_BLIND: f64 = 4.0;
+
+    var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .is_out = false, .has_acted = false, .current_bet = 0 };
+    var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .is_out = false, .has_acted = false, .current_bet = 0 };
+    var p3 = Player{ .name = "P3", .stack = PLAYER_STACK, .is_out = false, .has_acted = false, .current_bet = 0 };
+
+    var players = [_]*Player{ &p1, &p2, &p3 };
+
+    var game = Game{ .blind = BIG_BLIND, .players = &players, .round = Round.preflop, .pot_size = 0, .dealer_index = 0, .players_acted = 0, .current_player_index = 0, .highest_bet = 0 };
+
+    game.setup_round(Round.preflop);
+
+    try expectEqual(game.pot_size, game.blind * 1.5);
+    try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
+    try expectEqual(game.players[2].stack, PLAYER_STACK - BIG_BLIND);
+    try expectEqual(game.players_acted, 2);
+
+    game.fold();
+    game.raise(10.0);
+    game.raise(20.0);
+
+    try expectEqual(game.pot_size, 30);
+
+    game.fold();
+
+    try expectEqual(game.round, Round.over);
+    try expectEqual(game.players[0].stack, PLAYER_STACK);
+    try expectEqual(game.players[1].stack, PLAYER_STACK - 10.0);
+    try expectEqual(game.players[2].stack, PLAYER_STACK + 10.0);
+}
 
 test "Folding on the river" {
     const PLAYER_STACK: f64 = 100.0;
     const BIG_BLIND: f64 = 4.0;
 
-    var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .is_out = false, .current_bet = 0 };
-    var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .is_out = false, .current_bet = 0 };
-    var p3 = Player{ .name = "P3", .stack = PLAYER_STACK, .is_out = false, .current_bet = 0 };
+    var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .is_out = false, .has_acted = false, .current_bet = 0 };
+    var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .is_out = false, .has_acted = false, .current_bet = 0 };
+    var p3 = Player{ .name = "P3", .stack = PLAYER_STACK, .is_out = false, .has_acted = false, .current_bet = 0 };
 
     var players = [_]*Player{ &p1, &p2, &p3 };
 
@@ -332,6 +381,6 @@ test "Folding on the river" {
 
     try expectEqual(game.round, Round.over);
     try expectEqual(game.players[0].stack, PLAYER_STACK - 50);
-    try expectEqual(game.players[1].stack, PLAYER_STACK + 60);
-    try expectEqual(game.players[2].stack, PLAYER_STACK - 10);
+    try expectEqual(game.players[1].stack, PLAYER_STACK - 10);
+    try expectEqual(game.players[2].stack, PLAYER_STACK + 60);
 }
