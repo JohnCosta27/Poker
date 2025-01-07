@@ -61,6 +61,8 @@ pub const Game = struct {
 
     current_round_left_to_act: std.ArrayList(*Player),
 
+    current_action: f64,
+
     round: Round,
     pot_size: f64,
 
@@ -74,6 +76,7 @@ pub const Game = struct {
             .current_round_left_to_act = std.ArrayList(*Player).init(allocator),
             .round = Round.preflop,
             .pot_size = 0,
+            .current_action = 0,
         };
     }
 
@@ -92,6 +95,41 @@ pub const Game = struct {
         for (0..player_num) |i| {
             game.*.current_round_left_to_act.append(game.current_round_players[(i + 3) % player_num]) catch unreachable;
         }
+
+        game.*.current_action = game.blind;
+    }
+
+    pub fn check_end_round(game: *Game) void {
+        if (game.*.current_round_left_to_act.items.len > 0) {
+            return;
+        }
+    }
+
+    pub fn fold(game: *Game) void {
+        assert(game.current_round_left_to_act.items.len > 0);
+
+        _ = game.*.current_round_left_to_act.orderedRemove(0);
+    }
+
+    pub fn check(game: *Game) void {
+        assert(game.current_round_left_to_act.items.len > 0);
+
+        game.*.pot_size += game.*.current_round_left_to_act.items[0].*.bet(0);
+        _ = game.*.current_round_left_to_act.orderedRemove(0);
+    }
+
+    pub fn call(game: *Game) void {
+        assert(game.current_round_left_to_act.items.len > 0);
+
+        game.*.pot_size += game.*.current_round_left_to_act.items[0].*.bet(game.current_action);
+        _ = game.*.current_round_left_to_act.orderedRemove(0);
+    }
+
+    pub fn raise(game: *Game, amount: f64) void {
+        assert(game.current_round_left_to_act.items.len > 0);
+
+        game.*.pot_size += game.*.current_round_left_to_act.items[0].*.bet(amount);
+        _ = game.*.current_round_left_to_act.orderedRemove(0);
     }
 };
 
@@ -126,6 +164,8 @@ test "Setting up the game with correct blind sizes and left to act players" {
     try expect(std.mem.eql(u8, game.current_round_left_to_act.items[0].name, "P1"));
     try expect(std.mem.eql(u8, game.current_round_left_to_act.items[1].name, "P2"));
     try expect(std.mem.eql(u8, game.current_round_left_to_act.items[2].name, "P3"));
+
+    try expectEqual(game.current_action, BIG_BLIND);
 }
 
 test "Setting up the game in a heads-up format" {
@@ -150,6 +190,8 @@ test "Setting up the game in a heads-up format" {
     try expectEqual(game.current_round_left_to_act.items.len, 2);
     try expect(std.mem.eql(u8, game.current_round_left_to_act.items[0].name, "P2"));
     try expect(std.mem.eql(u8, game.current_round_left_to_act.items[1].name, "P1"));
+
+    try expectEqual(game.current_action, BIG_BLIND);
 }
 
 test "Setup when a player doesnt have enough to cover the blinds" {
@@ -170,4 +212,33 @@ test "Setup when a player doesnt have enough to cover the blinds" {
     try expectEqual(game.pot_size, game.blind / 2 + 2);
     try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
     try expectEqual(game.players[2].stack, 0);
+
+    try expectEqual(game.current_action, BIG_BLIND);
+}
+
+test "Reaches flop when action has been settled" {
+    const allocator = std.heap.page_allocator;
+    const PLAYER_STACK: f64 = 100;
+    const BIG_BLIND: f64 = 4;
+
+    var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .current_bet = null };
+    var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .current_bet = null };
+    var p3 = Player{ .name = "P3", .stack = PLAYER_STACK, .current_bet = null };
+
+    var players = [_]*Player{ &p1, &p2, &p3 };
+
+    var game = Game.create(allocator, BIG_BLIND, &players);
+
+    game.start();
+
+    game.raise(BIG_BLIND * 2); // P1
+    game.fold(); // P2
+    game.call(); // P3
+
+    try expectEqual(game.current_round_left_to_act.items.len, 0);
+    try expectEqual(game.pot_size, 1.5 * BIG_BLIND + 2 * BIG_BLIND + BIG_BLIND);
+
+    try expectEqual(p1.stack, PLAYER_STACK - 2 * BIG_BLIND);
+    try expectEqual(p2.stack, PLAYER_STACK - 0.5 * BIG_BLIND);
+    try expectEqual(p3.stack, PLAYER_STACK - 2 * BIG_BLIND);
 }
