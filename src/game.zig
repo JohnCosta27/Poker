@@ -19,15 +19,22 @@ const Player = struct {
     // TODO: consider betting all-ins.
     pub fn bet(self: *Player, amount: f64) f64 {
         if (self.*.current_bet == null) {
-            self.*.current_bet = amount;
-        } else {
-            self.*.current_bet.? += amount;
+            self.*.current_bet = 0;
         }
 
-        self.*.stack -= amount;
+        if (self.stack < amount) {
+            assert(self.stack > 0);
 
-        // TODO: return less than amount if player is all-in.
-        return amount;
+            self.*.current_bet = self.stack;
+            self.*.stack = 0;
+
+            return self.current_bet.?;
+        } else {
+            self.*.current_bet.? += amount;
+            self.*.stack -= amount;
+
+            return amount;
+        }
     }
 };
 
@@ -143,4 +150,24 @@ test "Setting up the game in a heads-up format" {
     try expectEqual(game.current_round_left_to_act.items.len, 2);
     try expect(std.mem.eql(u8, game.current_round_left_to_act.items[0].name, "P2"));
     try expect(std.mem.eql(u8, game.current_round_left_to_act.items[1].name, "P1"));
+}
+
+test "Setup when a player doesnt have enough to cover the blinds" {
+    const allocator = std.heap.page_allocator;
+    const PLAYER_STACK: f64 = 100;
+    const BIG_BLIND: f64 = 4;
+
+    var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .current_bet = null };
+    var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .current_bet = null };
+    var p3 = Player{ .name = "P3", .stack = 2, .current_bet = null };
+
+    var players = [_]*Player{ &p1, &p2, &p3 };
+
+    var game = Game.create(allocator, BIG_BLIND, &players);
+
+    game.start();
+
+    try expectEqual(game.pot_size, game.blind / 2 + 2);
+    try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
+    try expectEqual(game.players[2].stack, 0);
 }
