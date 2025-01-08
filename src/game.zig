@@ -20,7 +20,9 @@ const Player = struct {
         return if (self.current_bet) |current_bet| current_bet else 0;
     }
 
-    // TODO: consider betting all-ins.
+    /// Bet a specific amount _more_.
+    /// Note: This method also considers all-ins, when you bet more
+    /// than you have in your stack, and returns the adjusted value.
     pub fn bet(self: *Player, amount: f64) f64 {
         if (self.*.current_bet == null) {
             self.*.current_bet = 0;
@@ -64,6 +66,10 @@ pub const Game = struct {
     current_round_players: []*Player,
 
     current_round_left_to_act: std.ArrayList(*Player),
+
+    // A list of players that have acted (but not folderd).
+    // This is used in case a player raises, which causes other
+    // players to have to act again.
     current_round_acted: std.ArrayList(*Player),
 
     current_action: f64,
@@ -114,6 +120,7 @@ pub const Game = struct {
             Round.preflop => {
                 game.*.round = Round.flop;
             },
+            else => unreachable, // todo
         }
     }
 
@@ -121,6 +128,7 @@ pub const Game = struct {
         assert(game.current_round_left_to_act.items.len > 0);
 
         _ = game.*.current_round_left_to_act.orderedRemove(0);
+        game.check_end_round();
     }
 
     pub fn check(game: *Game) void {
@@ -130,6 +138,8 @@ pub const Game = struct {
 
         const player = game.*.current_round_left_to_act.orderedRemove(0);
         game.*.current_round_acted.append(player) catch unreachable;
+
+        game.check_end_round();
     }
 
     pub fn call(game: *Game) void {
@@ -144,6 +154,8 @@ pub const Game = struct {
 
         const player = game.*.current_round_left_to_act.orderedRemove(0);
         game.*.current_round_acted.append(player) catch unreachable;
+
+        game.check_end_round();
     }
 
     pub fn raise(game: *Game, amount: f64) void {
@@ -165,6 +177,8 @@ pub const Game = struct {
         game.*.current_round_acted.append(player) catch unreachable;
 
         game.*.current_action = amount;
+
+        game.check_end_round();
     }
 };
 
@@ -274,8 +288,41 @@ test "Reaches flop when action has been settled" {
 
     try expectEqual(game.current_round_left_to_act.items.len, 0);
     try expectEqual(game.pot_size, SMALL_BLIND + 8 * BIG_BLIND);
+    try expectEqual(game.round, Round.flop);
 
     try expectEqual(p1.stack, PLAYER_STACK - 4 * BIG_BLIND);
     try expectEqual(p2.stack, PLAYER_STACK - 0.5 * BIG_BLIND);
     try expectEqual(p3.stack, PLAYER_STACK - 4 * BIG_BLIND);
+}
+
+test "Raising battle" {
+    const allocator = std.heap.page_allocator;
+    const PLAYER_STACK: f64 = 100;
+    const BIG_BLIND: f64 = 1;
+
+    var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .current_bet = null };
+    var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .current_bet = null };
+    var p3 = Player{ .name = "P3", .stack = PLAYER_STACK, .current_bet = null };
+
+    var players = [_]*Player{ &p1, &p2, &p3 };
+
+    var game = Game.create(allocator, BIG_BLIND, &players);
+
+    game.start();
+
+    game.fold(); // P1
+    game.raise(BIG_BLIND * 2); // P2
+    game.raise(BIG_BLIND * 4); // P3
+    game.raise(BIG_BLIND * 8); // P2
+    game.raise(BIG_BLIND * 16); // P3
+    game.raise(BIG_BLIND * 32); // P2
+    game.call(); // P3
+
+    try expectEqual(game.current_round_left_to_act.items.len, 0);
+    try expectEqual(game.pot_size, 32 * 2 * BIG_BLIND);
+    try expectEqual(game.round, Round.flop);
+
+    try expectEqual(p1.stack, PLAYER_STACK);
+    try expectEqual(p2.stack, PLAYER_STACK - 32 * BIG_BLIND);
+    try expectEqual(p3.stack, PLAYER_STACK - 32 * BIG_BLIND);
 }
