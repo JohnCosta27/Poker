@@ -16,6 +16,10 @@ const Player = struct {
     stack: f64,
     current_bet: ?f64,
 
+    pub fn get_current_bet(self: Player) f64 {
+        return if (self.current_bet) |current_bet| current_bet else 0;
+    }
+
     // TODO: consider betting all-ins.
     pub fn bet(self: *Player, amount: f64) f64 {
         if (self.*.current_bet == null) {
@@ -60,6 +64,7 @@ pub const Game = struct {
     current_round_players: []*Player,
 
     current_round_left_to_act: std.ArrayList(*Player),
+    current_round_acted: std.ArrayList(*Player),
 
     current_action: f64,
 
@@ -74,6 +79,7 @@ pub const Game = struct {
             .players = players,
             .current_round_players = players,
             .current_round_left_to_act = std.ArrayList(*Player).init(allocator),
+            .current_round_acted = std.ArrayList(*Player).init(allocator),
             .round = Round.preflop,
             .pot_size = 0,
             .current_action = 0,
@@ -103,6 +109,12 @@ pub const Game = struct {
         if (game.*.current_round_left_to_act.items.len > 0) {
             return;
         }
+
+        switch (game.*.round) {
+            Round.preflop => {
+                game.*.round = Round.flop;
+            },
+        }
     }
 
     pub fn fold(game: *Game) void {
@@ -115,21 +127,44 @@ pub const Game = struct {
         assert(game.current_round_left_to_act.items.len > 0);
 
         game.*.pot_size += game.*.current_round_left_to_act.items[0].*.bet(0);
-        _ = game.*.current_round_left_to_act.orderedRemove(0);
+
+        const player = game.*.current_round_left_to_act.orderedRemove(0);
+        game.*.current_round_acted.append(player) catch unreachable;
     }
 
     pub fn call(game: *Game) void {
         assert(game.current_round_left_to_act.items.len > 0);
 
-        game.*.pot_size += game.*.current_round_left_to_act.items[0].*.bet(game.current_action);
-        _ = game.*.current_round_left_to_act.orderedRemove(0);
+        const player_to_act = game.*.current_round_left_to_act.items[0];
+
+        const left_to_bet = game.current_action - player_to_act.get_current_bet();
+        assert(left_to_bet > 0);
+
+        game.*.pot_size += player_to_act.*.bet(left_to_bet);
+
+        const player = game.*.current_round_left_to_act.orderedRemove(0);
+        game.*.current_round_acted.append(player) catch unreachable;
     }
 
     pub fn raise(game: *Game, amount: f64) void {
         assert(game.current_round_left_to_act.items.len > 0);
 
-        game.*.pot_size += game.*.current_round_left_to_act.items[0].*.bet(amount);
-        _ = game.*.current_round_left_to_act.orderedRemove(0);
+        const player_to_act = game.*.current_round_left_to_act.items[0];
+
+        const left_to_bet = amount - player_to_act.get_current_bet();
+        assert(left_to_bet > 0);
+
+        game.*.pot_size += player_to_act.*.bet(left_to_bet);
+
+        const player = game.*.current_round_left_to_act.orderedRemove(0);
+
+        // Raising causes other players to need to act again.
+        game.*.current_round_left_to_act.appendSlice(game.current_round_acted.items) catch unreachable;
+
+        game.*.current_round_acted.clearRetainingCapacity();
+        game.*.current_round_acted.append(player) catch unreachable;
+
+        game.*.current_action = amount;
     }
 };
 
@@ -219,7 +254,8 @@ test "Setup when a player doesnt have enough to cover the blinds" {
 test "Reaches flop when action has been settled" {
     const allocator = std.heap.page_allocator;
     const PLAYER_STACK: f64 = 100;
-    const BIG_BLIND: f64 = 4;
+    const BIG_BLIND: f64 = 1;
+    const SMALL_BLIND = BIG_BLIND / 2;
 
     var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .current_bet = null };
     var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .current_bet = null };
@@ -233,12 +269,13 @@ test "Reaches flop when action has been settled" {
 
     game.raise(BIG_BLIND * 2); // P1
     game.fold(); // P2
-    game.call(); // P3
+    game.raise(BIG_BLIND * 4); // P3
+    game.call(); // P1 (putting 2BB more in)
 
     try expectEqual(game.current_round_left_to_act.items.len, 0);
-    try expectEqual(game.pot_size, 1.5 * BIG_BLIND + 2 * BIG_BLIND + BIG_BLIND);
+    try expectEqual(game.pot_size, SMALL_BLIND + 8 * BIG_BLIND);
 
-    try expectEqual(p1.stack, PLAYER_STACK - 2 * BIG_BLIND);
+    try expectEqual(p1.stack, PLAYER_STACK - 4 * BIG_BLIND);
     try expectEqual(p2.stack, PLAYER_STACK - 0.5 * BIG_BLIND);
-    try expectEqual(p3.stack, PLAYER_STACK - 2 * BIG_BLIND);
+    try expectEqual(p3.stack, PLAYER_STACK - 4 * BIG_BLIND);
 }
