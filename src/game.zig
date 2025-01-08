@@ -44,7 +44,22 @@ const Player = struct {
     }
 };
 
-const Round = enum { preflop, flop, turn, river, over };
+const Round = enum {
+    preflop,
+    flop,
+    turn,
+    river,
+    over,
+    pub fn get_next(self: Round) Round {
+        return switch (self) {
+            Round.preflop => Round.flop,
+            Round.flop => Round.turn,
+            Round.turn => Round.river,
+            Round.river => unreachable,
+            Round.over => unreachable,
+        };
+    }
+};
 const Move = enum { fold, check, call, raise };
 
 fn assert(condition: bool) void {
@@ -94,8 +109,9 @@ pub const Game = struct {
 
     /// Start by adding the blinds to the pot and correctly setting up our work-queue
     pub fn start(game: *Game) void {
-        assert(game.round == Round.preflop);
         assert(game.current_round_players.len >= MIN_PLAYERS);
+
+        game.*.round = Round.preflop;
 
         const player_num = game.current_round_players.len;
 
@@ -111,17 +127,66 @@ pub const Game = struct {
         game.*.current_action = game.blind;
     }
 
-    pub fn check_end_round(game: *Game) void {
+    fn print_players_to_act(game: *Game) void {
+        for (game.current_round_left_to_act.items) |player| {
+            std.debug.print("Player: {s}\n", .{player.name});
+        }
+        std.debug.print("Pot size: {}\n", .{game.pot_size});
+    }
+
+    /// Checks who the winner is and adds the pot to his stack.
+    /// TODO: multi-pots should also be handled.
+    fn end_round(game: *Game) void {
+        std.debug.print("Here!\n", .{});
+        const acted_length = game.current_round_acted.items.len;
+        assert(acted_length > 0);
+
+        if (acted_length == 1) {
+            // All folded except one.
+            const winning_player = game.current_round_acted.items[0];
+
+            std.debug.print("Winning player: {s}\n", .{winning_player.name});
+
+            winning_player.*.stack += game.pot_size;
+        } else {
+            // Showdown.
+            unreachable;
+        }
+    }
+
+    fn check_end_round(game: *Game) void {
         if (game.*.current_round_left_to_act.items.len > 0) {
             return;
         }
 
-        switch (game.*.round) {
-            Round.preflop => {
-                game.*.round = Round.flop;
-            },
-            else => unreachable, // todo
+        const acted_length = game.current_round_acted.items.len;
+        assert(acted_length > 0);
+
+        if (acted_length == 1 or game.round == Round.river) {
+            game.*.end_round();
+            return;
         }
+
+        game.*.round = game.round.get_next();
+
+        if (game.round == Round.preflop) {
+            const copied_left_to_act = game.allocator.alloc(*Player, acted_length) catch unreachable;
+
+            std.mem.copyForwards(*Player, copied_left_to_act, game.current_round_acted.items);
+
+            for (0..acted_length) |i| {
+                game.current_round_left_to_act.items[(2 + i) % acted_length] = copied_left_to_act[i];
+            }
+
+            game.allocator.free(copied_left_to_act);
+        }
+
+        for (game.current_round_acted.items) |player| {
+            player.*.current_bet = null;
+        }
+
+        game.*.current_round_left_to_act.appendSlice(game.current_round_acted.items) catch unreachable;
+        game.*.current_round_acted.clearRetainingCapacity();
     }
 
     pub fn fold(game: *Game) void {
@@ -177,6 +242,8 @@ pub const Game = struct {
         game.*.current_round_acted.append(player) catch unreachable;
 
         game.*.current_action = amount;
+
+        // std.debug.print("Player {s} raises {}, pot size: {}\n", .{ player.name, amount, game.pot_size });
 
         game.check_end_round();
     }
@@ -286,7 +353,6 @@ test "Reaches flop when action has been settled" {
     game.raise(BIG_BLIND * 4); // P3
     game.call(); // P1 (putting 2BB more in)
 
-    try expectEqual(game.current_round_left_to_act.items.len, 0);
     try expectEqual(game.pot_size, SMALL_BLIND + 8 * BIG_BLIND);
     try expectEqual(game.round, Round.flop);
 
@@ -318,11 +384,56 @@ test "Raising battle" {
     game.raise(BIG_BLIND * 32); // P2
     game.call(); // P3
 
-    try expectEqual(game.current_round_left_to_act.items.len, 0);
     try expectEqual(game.pot_size, 32 * 2 * BIG_BLIND);
     try expectEqual(game.round, Round.flop);
 
     try expectEqual(p1.stack, PLAYER_STACK);
     try expectEqual(p2.stack, PLAYER_STACK - 32 * BIG_BLIND);
     try expectEqual(p3.stack, PLAYER_STACK - 32 * BIG_BLIND);
+}
+
+test "Folding on the river" {
+    const allocator = std.heap.page_allocator;
+    const PLAYER_STACK: f64 = 100;
+    const BIG_BLIND: f64 = 1;
+
+    var p1 = Player{ .name = "P1", .stack = PLAYER_STACK, .current_bet = null };
+    var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .current_bet = null };
+    var p3 = Player{ .name = "P3", .stack = PLAYER_STACK, .current_bet = null };
+
+    var players = [_]*Player{ &p1, &p2, &p3 };
+
+    var game = Game.create(allocator, BIG_BLIND, &players);
+
+    game.start();
+
+    game.fold(); // P1
+    game.raise(BIG_BLIND * 2); // P2
+    game.raise(BIG_BLIND * 4); // P3
+    game.call(); // P2
+
+    try expectEqual(game.pot_size, 4 * 2 * BIG_BLIND);
+    try expectEqual(game.round, Round.flop);
+
+    game.raise(BIG_BLIND * 16); // P2
+    game.raise(BIG_BLIND * 32); // P3
+    game.call(); // P2
+
+    try expectEqual(game.pot_size, 4 * 2 * BIG_BLIND + 32 * 2 * BIG_BLIND);
+    try expectEqual(game.round, Round.turn);
+
+    game.print_players_to_act();
+    game.check(); // P2
+    game.check(); // P3
+
+    try expectEqual(game.pot_size, 4 * 2 * BIG_BLIND + 32 * 2 * BIG_BLIND);
+    try expectEqual(game.round, Round.river);
+
+    game.print_players_to_act();
+    game.raise(BIG_BLIND * 20); // P2
+    game.fold(); // P3
+
+    try expectEqual(p1.stack, PLAYER_STACK);
+    try expectEqual(p2.stack, PLAYER_STACK + (4 + 32) * BIG_BLIND);
+    try expectEqual(p3.stack, PLAYER_STACK - (4 + 32) * BIG_BLIND);
 }
