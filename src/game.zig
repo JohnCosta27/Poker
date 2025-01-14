@@ -44,6 +44,17 @@ const Player = struct {
     }
 };
 
+const Pot = struct {
+    pot_size: f64,
+    players_involved: []*Player,
+
+    pub fn increase(self: *Pot, amount: f64) void {
+        assert(amount >= 0);
+
+        self.*.pot_size += amount;
+    }
+};
+
 const Round = enum {
     preflop,
     flop,
@@ -90,10 +101,18 @@ pub const Game = struct {
     current_action: f64,
 
     round: Round,
-    pot_size: f64,
+    pots: std.ArrayList(*Pot),
 
     /// Factory method with a brand new game state.
     pub fn create(allocator: std.mem.Allocator, blind: f64, players: []*Player) Game {
+        var pots = std.ArrayList(*Pot).init(allocator);
+        const initial_pot = allocator.create(Pot) catch unreachable;
+
+        initial_pot.*.pot_size = 0;
+        initial_pot.*.players_involved = players;
+
+        pots.append(initial_pot) catch unreachable;
+
         return Game{
             .allocator = allocator,
             .blind = blind,
@@ -102,7 +121,7 @@ pub const Game = struct {
             .current_round_left_to_act = std.ArrayList(*Player).init(allocator),
             .current_round_acted = std.ArrayList(*Player).init(allocator),
             .round = Round.preflop,
-            .pot_size = 0,
+            .pots = pots,
             .current_action = 0,
         };
     }
@@ -115,10 +134,10 @@ pub const Game = struct {
 
         const player_num = game.current_round_players.len;
 
-        game.*.pot_size += game.current_round_players[1].*.bet(game.blind / 2);
+        game.*.pots.getLast().*.increase(game.current_round_players[1].*.bet(game.blind / 2));
 
         // In a heads-up game, we need to wrap around because there are only two players.
-        game.*.pot_size += game.current_round_players[2 % player_num].*.bet(game.blind);
+        game.*.pots.getLast().*.increase(game.current_round_players[2 % player_num].*.bet(game.blind));
 
         for (0..player_num) |i| {
             game.*.current_round_left_to_act.append(game.current_round_players[(i + 3) % player_num]) catch unreachable;
@@ -131,13 +150,12 @@ pub const Game = struct {
         for (game.current_round_left_to_act.items) |player| {
             std.debug.print("Player: {s}\n", .{player.name});
         }
-        std.debug.print("Pot size: {}\n", .{game.pot_size});
+        std.debug.print("Pot size: {}\n", .{game.pots.getLast().pot_size});
     }
 
     /// Checks who the winner is and adds the pot to his stack.
     /// TODO: multi-pots should also be handled.
     fn end_round(game: *Game) void {
-        std.debug.print("Here!\n", .{});
         const acted_length = game.current_round_acted.items.len;
         assert(acted_length > 0);
 
@@ -145,9 +163,7 @@ pub const Game = struct {
             // All folded except one.
             const winning_player = game.current_round_acted.items[0];
 
-            std.debug.print("Winning player: {s}\n", .{winning_player.name});
-
-            winning_player.*.stack += game.pot_size;
+            winning_player.*.stack += game.pots.getLast().pot_size;
         } else {
             // Showdown.
             unreachable;
@@ -169,6 +185,9 @@ pub const Game = struct {
 
         game.*.round = game.round.get_next();
 
+        // Because preflop the UTG player acts first
+        // we need to shift the array a few places so the SB acts first in
+        // the flop.
         if (game.round == Round.preflop) {
             const copied_left_to_act = game.allocator.alloc(*Player, acted_length) catch unreachable;
 
@@ -199,7 +218,7 @@ pub const Game = struct {
     pub fn check(game: *Game) void {
         assert(game.current_round_left_to_act.items.len > 0);
 
-        game.*.pot_size += game.*.current_round_left_to_act.items[0].*.bet(0);
+        game.*.pots.getLast().*.increase(game.*.current_round_left_to_act.items[0].*.bet(0));
 
         const player = game.*.current_round_left_to_act.orderedRemove(0);
         game.*.current_round_acted.append(player) catch unreachable;
@@ -215,7 +234,7 @@ pub const Game = struct {
         const left_to_bet = game.current_action - player_to_act.get_current_bet();
         assert(left_to_bet > 0);
 
-        game.*.pot_size += player_to_act.*.bet(left_to_bet);
+        game.*.pots.getLast().*.increase(player_to_act.*.bet(left_to_bet));
 
         const player = game.*.current_round_left_to_act.orderedRemove(0);
         game.*.current_round_acted.append(player) catch unreachable;
@@ -231,7 +250,7 @@ pub const Game = struct {
         const left_to_bet = amount - player_to_act.get_current_bet();
         assert(left_to_bet > 0);
 
-        game.*.pot_size += player_to_act.*.bet(left_to_bet);
+        game.*.pots.getLast().*.increase(player_to_act.*.bet(left_to_bet));
 
         const player = game.*.current_round_left_to_act.orderedRemove(0);
 
@@ -242,8 +261,6 @@ pub const Game = struct {
         game.*.current_round_acted.append(player) catch unreachable;
 
         game.*.current_action = amount;
-
-        // std.debug.print("Player {s} raises {}, pot size: {}\n", .{ player.name, amount, game.pot_size });
 
         game.check_end_round();
     }
@@ -267,7 +284,7 @@ test "Setting up the game with correct blind sizes and left to act players" {
 
     game.start();
 
-    try expectEqual(game.pot_size, game.blind * 1.5);
+    try expectEqual(game.pots.getLast().pot_size, game.blind * 1.5);
     try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
     try expectEqual(game.players[2].stack, PLAYER_STACK - BIG_BLIND);
 
@@ -298,7 +315,7 @@ test "Setting up the game in a heads-up format" {
 
     game.start();
 
-    try expectEqual(game.pot_size, game.blind * 1.5);
+    try expectEqual(game.pots.getLast().pot_size, game.blind * 1.5);
     try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
     // Wraps around to player 0
     try expectEqual(game.players[0].stack, PLAYER_STACK - BIG_BLIND);
@@ -325,7 +342,7 @@ test "Setup when a player doesnt have enough to cover the blinds" {
 
     game.start();
 
-    try expectEqual(game.pot_size, game.blind / 2 + 2);
+    try expectEqual(game.pots.getLast().pot_size, game.blind / 2 + 2);
     try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
     try expectEqual(game.players[2].stack, 0);
 
@@ -353,7 +370,7 @@ test "Reaches flop when action has been settled" {
     game.raise(BIG_BLIND * 4); // P3
     game.call(); // P1 (putting 2BB more in)
 
-    try expectEqual(game.pot_size, SMALL_BLIND + 8 * BIG_BLIND);
+    try expectEqual(game.pots.getLast().pot_size, SMALL_BLIND + 8 * BIG_BLIND);
     try expectEqual(game.round, Round.flop);
 
     try expectEqual(p1.stack, PLAYER_STACK - 4 * BIG_BLIND);
@@ -384,7 +401,7 @@ test "Raising battle" {
     game.raise(BIG_BLIND * 32); // P2
     game.call(); // P3
 
-    try expectEqual(game.pot_size, 32 * 2 * BIG_BLIND);
+    try expectEqual(game.pots.getLast().pot_size, 32 * 2 * BIG_BLIND);
     try expectEqual(game.round, Round.flop);
 
     try expectEqual(p1.stack, PLAYER_STACK);
@@ -412,24 +429,22 @@ test "Folding on the river" {
     game.raise(BIG_BLIND * 4); // P3
     game.call(); // P2
 
-    try expectEqual(game.pot_size, 4 * 2 * BIG_BLIND);
+    try expectEqual(game.pots.getLast().pot_size, 4 * 2 * BIG_BLIND);
     try expectEqual(game.round, Round.flop);
 
     game.raise(BIG_BLIND * 16); // P2
     game.raise(BIG_BLIND * 32); // P3
     game.call(); // P2
 
-    try expectEqual(game.pot_size, 4 * 2 * BIG_BLIND + 32 * 2 * BIG_BLIND);
+    try expectEqual(game.pots.getLast().pot_size, 4 * 2 * BIG_BLIND + 32 * 2 * BIG_BLIND);
     try expectEqual(game.round, Round.turn);
 
-    game.print_players_to_act();
     game.check(); // P2
     game.check(); // P3
 
-    try expectEqual(game.pot_size, 4 * 2 * BIG_BLIND + 32 * 2 * BIG_BLIND);
+    try expectEqual(game.pots.getLast().pot_size, 4 * 2 * BIG_BLIND + 32 * 2 * BIG_BLIND);
     try expectEqual(game.round, Round.river);
 
-    game.print_players_to_act();
     game.raise(BIG_BLIND * 20); // P2
     game.fold(); // P3
 
