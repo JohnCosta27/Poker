@@ -44,6 +44,8 @@ fn unique5() []const u16 {
 const HIGHEST_BIT_PATTERN = (cards.constants.ace | cards.constants.king | cards.constants.queen | cards.constants.jack | cards.constants.ten) + 1;
 
 pub fn generate_flushes() [HIGHEST_BIT_PATTERN]u16 {
+    @setEvalBranchQuota(100000);
+
     const unique_hands = unique5();
     var flushes: [HIGHEST_BIT_PATTERN]u16 = std.mem.zeroes([HIGHEST_BIT_PATTERN]u16);
 
@@ -74,6 +76,8 @@ pub fn generate_flushes() [HIGHEST_BIT_PATTERN]u16 {
 }
 
 pub fn generate_unique() [HIGHEST_BIT_PATTERN]u16 {
+    @setEvalBranchQuota(100000);
+
     const unique_hands = unique5();
 
     var unique: [HIGHEST_BIT_PATTERN]u16 = std.mem.zeroes([HIGHEST_BIT_PATTERN]u16);
