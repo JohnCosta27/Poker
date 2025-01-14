@@ -10,7 +10,7 @@ const BIG_BLIND_OFFSET = 2;
 
 const MIN_PLAYERS = 2;
 
-const Player = struct {
+pub const Player = struct {
     name: []const u8,
 
     stack: f64,
@@ -171,6 +171,7 @@ pub const Game = struct {
     }
 
     fn check_end_round(game: *Game) void {
+        // game.print_players_to_act();
         if (game.*.current_round_left_to_act.items.len > 0) {
             return;
         }
@@ -183,28 +184,41 @@ pub const Game = struct {
             return;
         }
 
+        var remaining_players = std.ArrayList(*Player).init(game.allocator);
+        defer remaining_players.clearAndFree();
+
+        for (game.current_round_acted.items) |p| {
+            assert(p.stack >= 0);
+
+            if (p.stack == 0) {
+                continue;
+            }
+
+            remaining_players.append(p) catch unreachable;
+        }
+
         game.*.round = game.round.get_next();
 
         // Because preflop the UTG player acts first
         // we need to shift the array a few places so the SB acts first in
         // the flop.
         if (game.round == Round.preflop) {
-            const copied_left_to_act = game.allocator.alloc(*Player, acted_length) catch unreachable;
+            // TODO: I'm pretty sure we can do this without another alloc.
+            const copied_left_to_act = game.allocator.alloc(*Player, remaining_players.items.len) catch unreachable;
+            defer game.allocator.free(copied_left_to_act);
 
-            std.mem.copyForwards(*Player, copied_left_to_act, game.current_round_acted.items);
+            std.mem.copyForwards(*Player, copied_left_to_act, remaining_players.items);
 
             for (0..acted_length) |i| {
-                game.current_round_left_to_act.items[(2 + i) % acted_length] = copied_left_to_act[i];
+                game.current_round_left_to_act.items[(2 + i) % copied_left_to_act.len] = copied_left_to_act[i];
             }
-
-            game.allocator.free(copied_left_to_act);
         }
 
         for (game.current_round_acted.items) |player| {
             player.*.current_bet = null;
         }
 
-        game.*.current_round_left_to_act.appendSlice(game.current_round_acted.items) catch unreachable;
+        game.*.current_round_left_to_act.appendSlice(remaining_players.items) catch unreachable;
         game.*.current_round_acted.clearRetainingCapacity();
     }
 
@@ -226,6 +240,40 @@ pub const Game = struct {
         game.check_end_round();
     }
 
+    fn check_side_pot(game: *Game) void {
+        const last_player = game.current_round_acted.getLast();
+
+        if (last_player.stack > 0) {
+            return;
+        }
+
+        // They must have jammed their last turn, and therefore
+        // we now have a sidepot.
+
+        const pot_players_involved = game.pots.getLast().players_involved;
+
+        var side_pot_players = game.allocator.alloc(*Player, pot_players_involved.len - 1) catch unreachable;
+
+        var index: usize = 0;
+        for (pot_players_involved, 0..) |player, old_pot_index| {
+            if (player == last_player) {
+                continue;
+            }
+
+            side_pot_players[index] = pot_players_involved[old_pot_index];
+            index += 1;
+        }
+
+        const side_pot = game.allocator.create(Pot) catch unreachable;
+
+        side_pot.*.pot_size = 0;
+        side_pot.*.players_involved = side_pot_players;
+
+        game.*.pots.append(side_pot) catch unreachable;
+    }
+
+    /// TODO: when a player is put into an all-in situation.
+    /// The correct action is so call (not raise).
     pub fn call(game: *Game) void {
         assert(game.current_round_left_to_act.items.len > 0);
 
@@ -239,29 +287,35 @@ pub const Game = struct {
         const player = game.*.current_round_left_to_act.orderedRemove(0);
         game.*.current_round_acted.append(player) catch unreachable;
 
+        game.check_side_pot();
         game.check_end_round();
     }
 
     pub fn raise(game: *Game, amount: f64) void {
         assert(game.current_round_left_to_act.items.len > 0);
 
-        const player_to_act = game.*.current_round_left_to_act.items[0];
+        const player_to_act = game.*.current_round_left_to_act.orderedRemove(0);
 
         const left_to_bet = amount - player_to_act.get_current_bet();
         assert(left_to_bet > 0);
 
         game.*.pots.getLast().*.increase(player_to_act.*.bet(left_to_bet));
 
-        const player = game.*.current_round_left_to_act.orderedRemove(0);
-
-        // Raising causes other players to need to act again.
-        game.*.current_round_left_to_act.appendSlice(game.current_round_acted.items) catch unreachable;
-
-        game.*.current_round_acted.clearRetainingCapacity();
-        game.*.current_round_acted.append(player) catch unreachable;
-
         game.*.current_action = amount;
 
+        // Raising causes other players to need to act again.
+        for (game.current_round_acted.items) |p| {
+            if (p == player_to_act or p.stack == 0) {
+                continue;
+            }
+
+            game.*.current_round_left_to_act.append(p) catch unreachable;
+        }
+
+        game.*.current_round_acted.clearRetainingCapacity();
+        game.*.current_round_acted.append(player_to_act) catch unreachable;
+
+        game.check_side_pot();
         game.check_end_round();
     }
 };
@@ -299,6 +353,41 @@ test "Setting up the game with correct blind sizes and left to act players" {
     try expect(std.mem.eql(u8, game.current_round_left_to_act.items[2].name, "P3"));
 
     try expectEqual(game.current_action, BIG_BLIND);
+}
+
+test "Side pots" {
+    const allocator = std.heap.page_allocator;
+    const PLAYER_STACK: f64 = 100;
+    const BIG_BLIND: f64 = 4;
+
+    var p1 = Player{ .name = "P1", .stack = 10, .current_bet = null };
+    var p2 = Player{ .name = "P2", .stack = PLAYER_STACK, .current_bet = null };
+    var p3 = Player{ .name = "P3", .stack = PLAYER_STACK, .current_bet = null };
+
+    var players = [_]*Player{ &p1, &p2, &p3 };
+
+    var game = Game.create(allocator, BIG_BLIND, &players);
+
+    game.start();
+
+    try expectEqual(game.pots.getLast().pot_size, game.blind * 1.5);
+    try expectEqual(game.players[1].stack, PLAYER_STACK - BIG_BLIND / 2);
+    try expectEqual(game.players[2].stack, PLAYER_STACK - BIG_BLIND);
+
+    game.raise(10); // P3 jams.
+
+    game.raise(20); // P1 re-raises.
+    game.call(); // P2 calls.
+
+    try expectEqual(game.pots.items.len, 2);
+    try expectEqual(game.round, Round.flop);
+
+    game.check(); // P1 checks.
+    game.check(); // P2 checks.
+
+    // We shouldn't need P3 to act, as they have jammed.
+
+    try expectEqual(game.round, Round.turn);
 }
 
 test "Setting up the game in a heads-up format" {
@@ -429,21 +518,24 @@ test "Folding on the river" {
     game.raise(BIG_BLIND * 4); // P3
     game.call(); // P2
 
-    try expectEqual(game.pots.getLast().pot_size, 4 * 2 * BIG_BLIND);
+    try expectEqual(game.pots.items.len, 1);
     try expectEqual(game.round, Round.flop);
+    try expectEqual(game.pots.getLast().pot_size, 4 * 2 * BIG_BLIND);
 
     game.raise(BIG_BLIND * 16); // P2
     game.raise(BIG_BLIND * 32); // P3
     game.call(); // P2
 
-    try expectEqual(game.pots.getLast().pot_size, 4 * 2 * BIG_BLIND + 32 * 2 * BIG_BLIND);
+    try expectEqual(game.pots.items.len, 1);
     try expectEqual(game.round, Round.turn);
+    try expectEqual(game.pots.getLast().pot_size, 4 * 2 * BIG_BLIND + 32 * 2 * BIG_BLIND);
 
     game.check(); // P2
     game.check(); // P3
 
-    try expectEqual(game.pots.getLast().pot_size, 4 * 2 * BIG_BLIND + 32 * 2 * BIG_BLIND);
+    try expectEqual(game.pots.items.len, 1);
     try expectEqual(game.round, Round.river);
+    try expectEqual(game.pots.getLast().pot_size, 4 * 2 * BIG_BLIND + 32 * 2 * BIG_BLIND);
 
     game.raise(BIG_BLIND * 20); // P2
     game.fold(); // P3
