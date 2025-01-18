@@ -1,7 +1,52 @@
 pub const constants = @import("./constants.zig");
 
-pub const Suit = enum(u2) { club = 0, diamond, heart, spade };
-pub const Rank = enum(u4) { ace = 12, two = 0, three = 1, four = 2, five = 3, six = 4, seven = 5, eight = 6, nine = 7, ten = 8, jack = 9, queen = 10, king = 11 };
+pub const Suit = enum(u2) {
+    club = 0,
+    diamond,
+    heart,
+    spade,
+    pub fn name(self: Suit) []const u8 {
+        return switch (self) {
+            Suit.club => "Clubs",
+            Suit.diamond => "Diamonds",
+            Suit.heart => "Hearts",
+            Suit.spade => "Spades",
+        };
+    }
+};
+
+pub const Rank = enum(u4) {
+    ace = 12,
+    two = 0,
+    three = 1,
+    four = 2,
+    five = 3,
+    six = 4,
+    seven = 5,
+    eight = 6,
+    nine = 7,
+    ten = 8,
+    jack = 9,
+    queen = 10,
+    king = 11,
+    pub fn name(self: Rank) []const u8 {
+        return switch (self) {
+            Rank.ace => "Ace",
+            Rank.two => "Two",
+            Rank.three => "Three",
+            Rank.four => "Four",
+            Rank.five => "Five",
+            Rank.six => "Six",
+            Rank.seven => "Seven",
+            Rank.eight => "Eight",
+            Rank.nine => "Nine",
+            Rank.ten => "Ten",
+            Rank.jack => "Jack",
+            Rank.queen => "Queen",
+            Rank.king => "King",
+        };
+    }
+};
 
 fn get_suit_mask(suit: Suit) u32 {
     return switch (suit) {
@@ -33,6 +78,7 @@ fn get_rank_mask(rank: Rank) u32 {
 pub const Card = struct {
     Suit: Suit,
     Rank: Rank,
+
     Mask: u32,
 
     pub fn get_suit(self: Card) Suit {
