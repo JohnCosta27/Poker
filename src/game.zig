@@ -55,7 +55,7 @@ const Pot = struct {
     }
 };
 
-const Round = enum {
+pub const Round = enum {
     preflop,
     flop,
     turn,
@@ -132,18 +132,22 @@ pub const Game = struct {
 
         game.*.round = Round.preflop;
 
-        const player_num = game.current_round_players.len;
+        // game.*.pots.getLast().*.increase(game.current_round_players[1].*.bet(game.blind / 2));
+        //
+        // // In a heads-up game, we need to wrap around because there are only two players.
+        // game.*.pots.getLast().*.increase(game.current_round_players[2 % player_num].*.bet(game.blind));
 
-        game.*.pots.getLast().*.increase(game.current_round_players[1].*.bet(game.blind / 2));
-
-        // In a heads-up game, we need to wrap around because there are only two players.
-        game.*.pots.getLast().*.increase(game.current_round_players[2 % player_num].*.bet(game.blind));
-
-        for (0..player_num) |i| {
-            game.*.current_round_left_to_act.append(game.current_round_players[(i + 3) % player_num]) catch unreachable;
+        for (game.current_round_players) |player| {
+            game.*.current_round_left_to_act.append(player) catch unreachable;
         }
 
-        game.*.current_action = game.blind;
+        game.raise(game.blind / 2); // Small blind
+        game.raise(game.blind); // Big blind
+
+        // The blinds must get another chance to act.
+        game.current_round_left_to_act.append(game.current_round_players[1]) catch unreachable;
+
+        game.print_players_to_act();
     }
 
     fn print_players_to_act(game: *Game) void {
@@ -171,7 +175,6 @@ pub const Game = struct {
     }
 
     fn check_end_round(game: *Game) void {
-        // game.print_players_to_act();
         if (game.*.current_round_left_to_act.items.len > 0) {
             return;
         }
@@ -187,6 +190,12 @@ pub const Game = struct {
         var remaining_players = std.ArrayList(*Player).init(game.allocator);
         defer remaining_players.clearAndFree();
 
+        if (game.round == Round.preflop) {
+            _ = game.current_round_acted.orderedRemove(0);
+            const next = game.current_round_acted.orderedRemove(0);
+            game.current_round_acted.append(next) catch unreachable;
+        }
+
         for (game.current_round_acted.items) |p| {
             assert(p.stack >= 0);
 
@@ -194,25 +203,11 @@ pub const Game = struct {
                 continue;
             }
 
+            std.debug.print("Player: {s}\n", .{p.name});
             remaining_players.append(p) catch unreachable;
         }
 
         game.*.round = game.round.get_next();
-
-        // Because preflop the UTG player acts first
-        // we need to shift the array a few places so the SB acts first in
-        // the flop.
-        if (game.round == Round.preflop) {
-            // TODO: I'm pretty sure we can do this without another alloc.
-            const copied_left_to_act = game.allocator.alloc(*Player, remaining_players.items.len) catch unreachable;
-            defer game.allocator.free(copied_left_to_act);
-
-            std.mem.copyForwards(*Player, copied_left_to_act, remaining_players.items);
-
-            for (0..acted_length) |i| {
-                game.current_round_left_to_act.items[(2 + i) % copied_left_to_act.len] = copied_left_to_act[i];
-            }
-        }
 
         for (game.current_round_acted.items) |player| {
             player.*.current_bet = null;
@@ -289,6 +284,20 @@ pub const Game = struct {
 
         game.check_side_pot();
         game.check_end_round();
+    }
+
+    fn raise_blinds(game: *Game, amount: f64) void {
+        assert(game.current_round_left_to_act.items.len > 0);
+
+        const player_to_act = game.*.current_round_left_to_act.orderedRemove(0);
+
+        const left_to_bet = amount - player_to_act.get_current_bet();
+        assert(left_to_bet > 0);
+
+        game.*.pots.getLast().*.increase(player_to_act.*.bet(left_to_bet));
+
+        game.*.current_action = amount;
+        game.*.current_round_acted.append(player_to_act) catch unreachable;
     }
 
     pub fn raise(game: *Game, amount: f64) void {

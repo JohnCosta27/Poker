@@ -1,3 +1,4 @@
+const std = @import("std");
 pub const constants = @import("./constants.zig");
 
 pub const Suit = enum(u2) {
@@ -87,6 +88,10 @@ pub const Card = struct {
 
     pub fn get_prime(self: Card) usize {
         return self.Mask & 0xFF;
+    }
+
+    pub fn print(self: Card, writer: std.io.AnyWriter) !void {
+        try writer.print("{s} of {s}", .{ self.Rank.name(), self.Suit.name() });
     }
 };
 

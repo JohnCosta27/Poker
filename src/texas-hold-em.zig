@@ -19,6 +19,12 @@ pub const TexasHoldEm = struct {
 
     deck: Deck.Deck,
 
+    flop1: ?Cards.Card,
+    flop2: ?Cards.Card,
+    flop3: ?Cards.Card,
+    turn: ?Cards.Card,
+    river: ?Cards.Card,
+
     pub fn create(allocator: std.mem.Allocator, blinds: f64, game_players: []*Game.Player) TexasHoldEm {
         var players = allocator.alloc(*TexasHoldEmPlayer, game_players.len) catch unreachable;
 
@@ -37,13 +43,21 @@ pub const TexasHoldEm = struct {
             .game = game,
             .players = players,
             .deck = Deck.Deck.create(),
+
+            .flop1 = null,
+            .flop2 = null,
+            .flop3 = null,
+            .turn = null,
+            .river = null,
         };
     }
 
     pub fn print_player_cards(holdem: TexasHoldEm) void {
         for (holdem.players) |player| {
-            std.debug.print("{s} - {s} of {s}, {s} of {s}\n", .{
+            std.debug.print("{s}. Stack: {d} - {s} of {s}, {s} of {s}\n", .{
                 player.player.name,
+
+                player.player.stack,
 
                 player.c1.Rank.name(),
                 player.c1.Suit.name(),
@@ -66,5 +80,11 @@ pub const TexasHoldEm = struct {
             // You deal to the small blind first.
             holdem.players[(player_index + 1) % holdem.players.len].*.c2 = holdem.*.deck.deal();
         }
+    }
+
+    pub fn flop(holdem: *TexasHoldEm) void {
+        holdem.*.flop1 = holdem.*.deck.deal();
+        holdem.*.flop2 = holdem.*.deck.deal();
+        holdem.*.flop3 = holdem.*.deck.deal();
     }
 };
