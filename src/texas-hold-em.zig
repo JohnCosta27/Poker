@@ -17,8 +17,6 @@ pub const TexasHoldEm = struct {
     players: []*TexasHoldEmPlayer,
     game: Game.Game,
 
-    deck: Deck.Deck,
-
     flop1: ?Cards.Card,
     flop2: ?Cards.Card,
     flop3: ?Cards.Card,
@@ -42,7 +40,6 @@ pub const TexasHoldEm = struct {
             .allocator = allocator,
             .game = game,
             .players = players,
-            .deck = Deck.Deck.create(),
 
             .flop1 = null,
             .flop2 = null,
@@ -66,25 +63,5 @@ pub const TexasHoldEm = struct {
                 player.c2.Suit.name(),
             });
         }
-    }
-
-    pub fn setup(holdem: *TexasHoldEm) void {
-        holdem.*.deck.shuffle();
-
-        for (0..holdem.players.len) |player_index| {
-            // You deal to the small blind first.
-            holdem.players[(player_index + 1) % holdem.players.len].*.c1 = holdem.*.deck.deal();
-        }
-
-        for (0..holdem.players.len) |player_index| {
-            // You deal to the small blind first.
-            holdem.players[(player_index + 1) % holdem.players.len].*.c2 = holdem.*.deck.deal();
-        }
-    }
-
-    pub fn flop(holdem: *TexasHoldEm) void {
-        holdem.*.flop1 = holdem.*.deck.deal();
-        holdem.*.flop2 = holdem.*.deck.deal();
-        holdem.*.flop3 = holdem.*.deck.deal();
     }
 };
